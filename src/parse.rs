@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 
 use self::Token::*;
+use capmatch::{SigmaTerm, CapTerm};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Token {
@@ -100,7 +101,7 @@ pub enum ParseError {
 // Args' -> ',' Args | epsilon
 
 impl<I: Iterator<Item=char>> Parser<I> {
-    fn intern(&mut self, n: String, is_const: bool) -> u32 {
+    pub fn intern(&mut self, n: String, is_const: bool) -> u32 {
         if is_const {
             let mut new = false;
             let l = match self.funcs_inverse.get(&n) {
@@ -150,10 +151,12 @@ impl<I: Iterator<Item=char>> Parser<I> {
         p.arities.push(2);
         p.intern(".em.".into(), false);
         p.intern(".ek.".into(), false);
+        p.intern(".MAGIC.".into(), true);
+        p.arities.push(0); // Outright lie, but MAGIC is internal and only used for expressing "and"
         p
     }
 
-    pub fn parse_cap_term(&mut self) -> Result<::CapTerm, ParseError> {
+    pub fn parse_cap_term(&mut self) -> Result<CapTerm, ParseError> {
         let mut un = vec![try!(self.parse_cap_b())];
         while self.l.peek().map_or(false, |t| t.is_word("|")) {
             self.l.next();
@@ -162,11 +165,11 @@ impl<I: Iterator<Item=char>> Parser<I> {
         if un.len() == 1 {
             Ok(un.swap_remove(0))
         } else {
-            Ok(::CapTerm::Union(un))
+            Ok(CapTerm::Union(un))
         }
     }
 
-    fn parse_cap_b(&mut self) -> Result<::CapTerm, ParseError> {
+    fn parse_cap_b(&mut self) -> Result<CapTerm, ParseError> {
         let mut un = vec![try!(self.parse_cap_c())];
         while self.l.peek().map_or(false, |t| t.is_word("&")) {
             self.l.next();
@@ -175,11 +178,11 @@ impl<I: Iterator<Item=char>> Parser<I> {
         if un.len() == 1 {
             Ok(un.swap_remove(0))
         } else {
-            Ok(::CapTerm::Union(un))
+            Ok(CapTerm::Union(un))
         }
     }
 
-    fn parse_cap_c(&mut self) -> Result<::CapTerm, ParseError> {
+    fn parse_cap_c(&mut self) -> Result<CapTerm, ParseError> {
         match self.l.next() {
             Some(Word(name, _)) => {
                 if self.l.peek() == Some(&LParen) {
@@ -199,15 +202,15 @@ impl<I: Iterator<Item=char>> Parser<I> {
                                                                      self.funcs[fs as usize], self.arities[fs as usize], args.len())));
                     }
                     try!(self.eat(RParen));
-                    Ok(::CapTerm::Func(fs, args))
+                    Ok(CapTerm::Func(fs, args))
                 } else {
-                    Ok(::CapTerm::Func(self.intern(name, true), vec![]))
+                    Ok(CapTerm::Func(self.intern(name, true), vec![]))
                 }
             },
             Some(Dot) => return Err(ParseError::Done),
             Some(Cap) => {
                 try!(self.eat(LParen));
-                let t = ::CapTerm::Cap(Box::new(try!(self.parse_cap_term())));
+                let t = CapTerm::Cap(Box::new(try!(self.parse_cap_term())));
                 try!(self.eat(RParen));
                 Ok(t)
             },
@@ -216,7 +219,7 @@ impl<I: Iterator<Item=char>> Parser<I> {
         }
     }
 
-    pub fn parse_sigma_term(&mut self) -> Result<::SigmaTerm, ParseError> {
+    pub fn parse_sigma_term(&mut self) -> Result<SigmaTerm, ParseError> {
         match self.l.next() {
             Some(Word(name, is_const)) => {
                 if self.l.peek() == Some(&LParen) {
@@ -235,9 +238,13 @@ impl<I: Iterator<Item=char>> Parser<I> {
                         return Err(ParseError::ArityMismatch(format!("expected {} arguments to {} by earlier usage, got {}", self.funcs[fs as usize], self.arities[fs as usize], args.len())));
                     }
                     try!(self.eat(RParen));
-                    Ok(::SigmaTerm::Func(fs, args))
+                    Ok(SigmaTerm::Func(fs, args))
+                } else if is_const {
+                    debug_assert!(is_const == true);
+                    Ok(SigmaTerm::Func(self.intern(name, true), Vec::new()))
                 } else {
-                    Ok(::SigmaTerm::Var(self.intern(name, is_const)))
+                    debug_assert!(is_const == false);
+                    Ok(SigmaTerm::Var(self.intern(name, false)))
                 }
             },
             Some(Dot) => return Err(ParseError::Done),
@@ -246,23 +253,23 @@ impl<I: Iterator<Item=char>> Parser<I> {
         }
     }
 
-    pub fn print_cap_term(&self, t: &::CapTerm) {
+    pub fn print_cap_term(&self, t: &CapTerm) {
         match *t {
-            ::CapTerm::Union(ref args) => {
+            CapTerm::Union(ref args) => {
                 for arg in args.iter().take(args.len()-1) {
                     self.print_cap_term(arg);
                     print!(" | ");
                 }
                 self.print_cap_term(args.last().unwrap());
             }
-            ::CapTerm::Intersection(ref args) => {
+            CapTerm::Intersection(ref args) => {
                 for arg in args.iter().take(args.len()-1) {
                     self.print_cap_term(arg);
                     print!(" & ");
                 }
                 self.print_cap_term(args.last().unwrap());
             }
-            ::CapTerm::Func(x, ref args) => {
+            CapTerm::Func(x, ref args) => {
                 print!("{}", &self.funcs[x as usize]);
                 if args.len() > 0 {
                     print!("(");
@@ -274,7 +281,7 @@ impl<I: Iterator<Item=char>> Parser<I> {
                     print!(")");
                 }
             }
-            ::CapTerm::Cap(ref arg) => {
+            CapTerm::Cap(ref arg) => {
                 print!("Cap(");
                 self.print_cap_term(arg);
                 print!(")");
@@ -282,9 +289,9 @@ impl<I: Iterator<Item=char>> Parser<I> {
         }
     }
 
-    pub fn print_sigma_term(&self, t: &::SigmaTerm) {
+    pub fn print_sigma_term(&self, t: &SigmaTerm) {
         match *t {
-            ::SigmaTerm::Func(x, ref args) => {
+            SigmaTerm::Func(x, ref args) => {
                 print!("{}", &self.funcs[x as usize]);
                 if args.len() > 0 {
                     print!("(");
@@ -296,7 +303,7 @@ impl<I: Iterator<Item=char>> Parser<I> {
                     print!(")");
                 }
             }
-            ::SigmaTerm::Var(x) => {
+            SigmaTerm::Var(x) => {
                 print!("{}", &self.vars[x as usize]);
             }
         }
