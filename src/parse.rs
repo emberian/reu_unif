@@ -3,6 +3,7 @@ use std::iter::Peekable;
 
 use self::Token::*;
 use capmatch::{SigmaTerm, CapTerm};
+use protocol::{Protocol, ProtocolRule};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Token {
@@ -134,6 +135,10 @@ impl<I: Iterator<Item=char>> Parser<I> {
         }
     }
 
+    pub fn dump_vars(&mut self) {
+        self.vars_inverse.clear();
+    }
+
     pub fn new(i: I) -> Parser<I> {
         let mut p = Parser {
             vars: Vec::new(),
@@ -240,7 +245,6 @@ impl<I: Iterator<Item=char>> Parser<I> {
                     try!(self.eat(RParen));
                     Ok(SigmaTerm::Func(fs, args))
                 } else if is_const {
-                    debug_assert!(is_const == true);
                     Ok(SigmaTerm::Func(self.intern(name, true), Vec::new()))
                 } else {
                     debug_assert!(is_const == false);
@@ -251,6 +255,91 @@ impl<I: Iterator<Item=char>> Parser<I> {
             Some(t) => Err(ParseError::BadSyntax(t, "expected a function, variable, or .".into())),
             None => Err(ParseError::WantedMore),
         }
+    }
+
+    fn parse_sigma_disjunction(&mut self) -> Result<Vec<SigmaTerm>, ParseError> {
+        let mut un = vec![try!(self.parse_sigma_term())];
+        while self.l.peek().map_or(false, |t| t.is_word("&")) {
+            self.l.next();
+            un.push(try!(self.parse_sigma_term()));
+        }
+        Ok(un)
+    }
+
+    fn parse_ground_term(&mut self) -> Result<SigmaTerm, ParseError> {
+        match self.l.next() {
+            Some(Word(name, is_const)) => {
+                if self.l.peek() == Some(&LParen) {
+                    try!(self.eat(LParen));
+                    let fs = self.intern(name, true);
+                    let mut args = Vec::new();
+                    while self.l.peek() != Some(&RParen) {
+                        args.push(try!(self.parse_sigma_term()));
+                        if self.l.peek() != Some(&RParen) {
+                            try!(self.eat(Comma));
+                        }
+                    }
+                    if self.arities[fs as usize] == 0 {
+                        self.arities[fs as usize] = args.len() as u32;
+                    } else if self.arities[fs as usize] != args.len() as u32 {
+                        return Err(ParseError::ArityMismatch(format!("expected {} arguments to {} by earlier usage, got {}", self.funcs[fs as usize], self.arities[fs as usize], args.len())));
+                    }
+                    try!(self.eat(RParen));
+                    Ok(SigmaTerm::Func(fs, args))
+                } else if is_const {
+                    Ok(SigmaTerm::Func(self.intern(name, true), Vec::new()))
+                } else {
+                    return Err(ParseError::BadSyntax(Word(name, false), "no variables here".into()));
+                }
+            },
+            Some(Dot) => return Err(ParseError::Done),
+            Some(t) => Err(ParseError::BadSyntax(t, "expected a function, variable, or .".into())),
+            None => Err(ParseError::WantedMore),
+        }
+    }
+
+    pub fn parse_protocol_rule(&mut self) -> Result<ProtocolRule, ParseError> {
+        self.dump_vars();
+        let lhs = try!(self.parse_sigma_disjunction());
+        if self.l.peek() != Some(&Word("->".into(), true)) {
+            return Err(ParseError::BadSyntax(self.l.next().unwrap(), "expected -> to separate hypothesis and conclusion in protocol rule".into()));
+        }
+        self.l.next();
+        let rhs = try!(self.parse_sigma_term());
+        Ok(ProtocolRule {
+            left: lhs,
+            right: rhs
+        })
+    }
+
+    pub fn parse_protocol(&mut self) -> Result<(Protocol, Vec<SigmaTerm>), ParseError> {
+        let mut facts = vec![];
+        while self.l.peek() != Some(&Word("%%".into(), true)) {
+            facts.push(try!(self.parse_ground_term()));
+            if self.l.peek() != Some(&Dot) {
+                return Err(ParseError::BadSyntax(self.l.next().unwrap(), "expected . to terminate fact".into()));
+            }
+            self.l.next();
+        }
+        self.l.next();
+        let mut rules = vec![];
+        while self.l.peek() != Some(&Word("%%".into(), true)) {
+            rules.push(try!(self.parse_protocol_rule()));
+            if self.l.peek() != Some(&Dot) {
+                return Err(ParseError::BadSyntax(self.l.next().unwrap(), "expected . to terminate protocol rule".into()));
+            }
+            self.l.next();
+        }
+        self.l.next();
+        let mut goals = vec![];
+        while self.l.peek() != Some(&Word("%%".into(), true)) && self.l.peek() != None {
+            goals.push(try!(self.parse_ground_term()));
+            if self.l.peek() != Some(&Dot) {
+                return Err(ParseError::BadSyntax(self.l.next().unwrap(), "expected . to terminate goal".into()));
+            }
+            self.l.next();
+        }
+        Ok((Protocol::new(facts, rules), goals))
     }
 
     pub fn print_cap_term(&self, t: &CapTerm) {

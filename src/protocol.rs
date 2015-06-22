@@ -18,7 +18,7 @@ impl Protocol {
         }
     }
 
-    pub fn forward_search(&self, context: &Context, goal: SigmaTerm) -> (bool, CapTerm) {
+    pub fn forward_search(&self, context: &Context, goal: &SigmaTerm) -> (bool, CapTerm) {
         // TODO: Provide a trace
         let mut knowledge = CapTerm::Union(self.facts.iter().map(|x| x.to_cap().unwrap()).collect());
         // we use length of the knowledge as a proxy termination measure
