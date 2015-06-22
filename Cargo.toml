@@ -2,6 +2,7 @@
 name = "unif"
 version = "0.1.0"
 authors = ["Corey Richardson <corey@octayn.net>"]
+license = "Proprietary"
 
 [dependencies]
 log = "*"
