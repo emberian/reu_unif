@@ -1,6 +1,4 @@
-All rights reserved, for now. Will probably release under a permissive license
-later. Documentation is TODO. Implemented in [Rust](http://rust-lang.org). Use
-`cargo run` to run.
+Dual Apache-2.0/MIT ("Rust license"). Documentation is TODO. Implemented in [Rust](http://rust-lang.org). Use `cargo run` to run.
 
 This material is based upon work supported by the National Science
 Foundation/EPSCoR under Grant No. DMS-1262737.
